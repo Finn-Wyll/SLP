@@ -1,0 +1,366 @@
+classDiagram
+    direction TB
+
+    %% ================= LEXICAL LAYER =================
+    class TokenType {
+        <<enumeration>>
+        NUM
+        USER_DEFINED_NAME
+        STRING
+        KW_VOID
+        KW_NUM
+        KW_RETURN
+        KW_PRINT
+        KW_NOP
+        KW_COMMENT
+        KW_IF
+        KW_THEN
+        KW_ELSE
+        KW_WHILE
+        KW_UNTIL
+        KW_DO
+        KW_NOT
+        KW_AND
+        KW_OR
+        KW_EQ
+        KW_LARGER
+        KW_LESSER
+        KW_MOD
+        KW_ADD
+        KW_SUB
+        KW_MUL
+        KW_DIV
+        KW_NEG
+        LPAREN
+        RPAREN
+        LBRACE
+        RBRACE
+        COLON
+        SEMICOLON
+        ASSIGN_OP
+        EOF
+    }
+
+    class Token {
+        -TokenType type
+        -String lexeme
+        -int line
+        -int column
+        +getType() TokenType
+        +getLexeme() String
+        +position() String
+        +toString() String
+    }
+
+    class SourceReader {
+        -String source
+        -int start
+        -int current
+        -int line
+        -int column
+        +peek() char
+        +peekNext() char
+        +advance() char
+        +match(char c) bool
+        +isAtEnd() bool
+        +currentLexeme() String
+        +beginLexeme() void
+    }
+
+    class Lexer {
+        -SourceReader reader
+        -Map~String, TokenType~ keywords
+        -ErrorReporter reporter
+        -Token lookahead
+        +nextToken() Token
+        +peekToken() Token
+        +tokenize() List~Token~
+        -skipBlanks() void
+        -scanLexeme() Token
+        -requireBlankTerminator() void
+        -classify(String lexeme) TokenType
+        -isNum(String s) bool
+        -isUserName(String s) bool
+        -isString(String s) bool
+    }
+
+    class LexicalError {
+        -String message
+        -String hint
+        -int line
+        -int column
+    }
+
+    Lexer *-- SourceReader
+    Lexer ..> Token : emits
+    Token --> TokenType
+    Lexer ..> LexicalError : raises
+
+    %% ================= GRAMMAR LAYER =================
+    class Symbol {
+        <<abstract>>
+        #String name
+        +getName() String
+        +isTerminal()* bool
+    }
+
+    class Terminal {
+        -TokenType type
+        +isTerminal() bool
+        +matches(Token t) bool
+    }
+
+    class NonTerminal {
+        -bool nullable
+        +isTerminal() bool
+    }
+
+    class Production {
+        -int id
+        -NonTerminal lhs
+        -List~Symbol~ rhs
+        +isEpsilon() bool
+        +length() int
+    }
+
+    class SPLGrammar {
+        -NonTerminal startSymbol
+        -List~Production~ productions
+        -Set~Terminal~ terminals
+        -Set~NonTerminal~ nonTerminals
+        +build() SPLGrammar
+        +augment() SPLGrammar
+        +productionsFor(NonTerminal a) List~Production~
+    }
+
+    class FirstFollowSets {
+        -SPLGrammar grammar
+        -Map~Symbol, Set~ first
+        -Map~NonTerminal, Set~ follow
+        -Set~NonTerminal~ nullable
+        +computeNullable() void
+        +computeFirst() void
+        +computeFollow() void
+        +first(List~Symbol~ seq) Set~Terminal~
+        +follow(NonTerminal a) Set~Terminal~
+    }
+
+    class LL1Analyser {
+        -FirstFollowSets sets
+        +isLL1() bool
+        +conflicts() List~String~
+    }
+
+    Symbol <|-- Terminal
+    Symbol <|-- NonTerminal
+    Production --> NonTerminal : lhs
+    Production o-- Symbol : rhs
+    SPLGrammar *-- Production
+    FirstFollowSets --> SPLGrammar
+    LL1Analyser --> FirstFollowSets
+    Terminal --> TokenType
+
+    %% ================= TABLE CONSTRUCTION =================
+    class LR0Item {
+        -Production production
+        -int dot
+        +nextSymbol() Symbol
+        +isComplete() bool
+        +advance() LR0Item
+    }
+
+    class ItemSet {
+        -int id
+        -Set~LR0Item~ kernel
+        -Set~LR0Item~ items
+        +closure(SPLGrammar g) void
+        +goto(Symbol x) ItemSet
+        +equals(ItemSet o) bool
+    }
+
+    class CanonicalCollection {
+        -SPLGrammar grammar
+        -List~ItemSet~ states
+        -Map~StateSymbolPair, int~ transitions
+        +build() void
+        +stateCount() int
+        +transition(int s, Symbol x) int
+    }
+
+    class Action {
+        <<abstract>>
+        +kind() String
+    }
+    class Shift {
+        -int targetState
+    }
+    class Reduce {
+        -Production production
+    }
+    class Accept
+    class ErrorEntry {
+        -Set~Terminal~ expected
+        -String hint
+    }
+
+    class ParseTable {
+        -Map~StateTerminalPair, Action~ actions
+        -Map~StateNonTerminalPair, int~ gotos
+        -List~Conflict~ conflicts
+        +action(int s, Terminal t) Action
+        +goto(int s, NonTerminal a) int
+        +expectedAt(int s) Set~Terminal~
+        +hasConflicts() bool
+    }
+
+    class SLRTableGenerator {
+        -SPLGrammar grammar
+        -CanonicalCollection collection
+        -FirstFollowSets sets
+        +generate() ParseTable
+        -addShiftsAndGotos() void
+        -addReductionsOnFollow() void
+        -recordConflict(int s, Terminal t) void
+    }
+
+    LR0Item --> Production
+    ItemSet *-- LR0Item
+    CanonicalCollection *-- ItemSet
+    Action <|-- Shift
+    Action <|-- Reduce
+    Action <|-- Accept
+    Action <|-- ErrorEntry
+    Reduce --> Production
+    ParseTable o-- Action
+    SLRTableGenerator --> CanonicalCollection
+    SLRTableGenerator --> FirstFollowSets
+    SLRTableGenerator ..> ParseTable : produces
+
+    %% ================= PARSER DRIVER =================
+    class ParseStack {
+        -Deque~int~ states
+        -Deque~SyntaxTreeNode~ nodes
+        +push(int state, SyntaxTreeNode n) void
+        +popMany(int k) List~SyntaxTreeNode~
+        +topState() int
+        +isEmpty() bool
+    }
+
+    class SLRParser {
+        -Lexer lexer
+        -ParseTable table
+        -ParseStack stack
+        -NodeIdGenerator ids
+        -ErrorReporter reporter
+        +parse() SyntaxTree
+        -shift(Token t, int target) void
+        -reduce(Production p) void
+        -buildError(Token t, int state) SyntaxError
+    }
+
+    class SyntaxError {
+        -Token found
+        -Set~Terminal~ expected
+        -String hint
+        -int line
+        +format() String
+    }
+
+    class ErrorReporter {
+        -List~String~ messages
+        -bool hadError
+        +lexicalError(LexicalError e) void
+        +syntaxError(SyntaxError e) void
+        +hadError() bool
+        +printAll() void
+    }
+
+    SLRParser --> Lexer : pulls tokens
+    SLRParser --> ParseTable : consults
+    SLRParser *-- ParseStack
+    SLRParser --> ErrorReporter
+    Lexer --> ErrorReporter
+    SLRParser ..> SyntaxError : raises
+    ParseStack o-- SyntaxTreeNode
+
+    %% ================= TREE + XML OUTPUT =================
+    class NodeIdGenerator {
+        -int next
+        +newId() int
+    }
+
+    class SyntaxTreeNode {
+        <<abstract>>
+        #int id
+        #Integer parentId
+        +getId() int
+        +setParent(int id) void
+        +contents()* String
+        +accept(TreeVisitor v)* void
+    }
+
+    class RootNode {
+        -NonTerminal symbol
+        -List~int~ childIds
+        +contents() String
+    }
+
+    class InnerNode {
+        -NonTerminal symbol
+        -List~int~ childIds
+        +contents() String
+    }
+
+    class LeafNode {
+        -Token token
+        +contents() String
+    }
+
+    class SyntaxTree {
+        -RootNode root
+        -Map~int, SyntaxTreeNode~ nodes
+        +addNode(SyntaxTreeNode n) void
+        +getNode(int id) SyntaxTreeNode
+        +traverse(TreeVisitor v) void
+    }
+
+    class TreeVisitor {
+        <<interface>>
+        +visitRoot(RootNode n) void
+        +visitInner(InnerNode n) void
+        +visitLeaf(LeafNode n) void
+    }
+
+    class XmlTreeWriter {
+        -Writer out
+        +write(SyntaxTree t, String path) void
+        -writeRoot(RootNode n) void
+        -writeInner(InnerNode n) void
+        -writeLeaf(LeafNode n) void
+        -escape(String s) String
+    }
+
+    SyntaxTreeNode <|-- RootNode
+    SyntaxTreeNode <|-- InnerNode
+    SyntaxTreeNode <|-- LeafNode
+    SyntaxTree *-- SyntaxTreeNode
+    SyntaxTree --> RootNode
+    LeafNode --> Token
+    RootNode --> NonTerminal
+    InnerNode --> NonTerminal
+    TreeVisitor <|.. XmlTreeWriter
+    SyntaxTree ..> TreeVisitor : accepts
+    SLRParser ..> SyntaxTree : builds
+    SLRParser --> NodeIdGenerator
+
+    %% ================= ENTRY POINT =================
+    class SPLCompiler {
+        +main(String[] args) void
+        -readSource(String path) String
+        -run(String source) int
+    }
+
+    SPLCompiler ..> Lexer
+    SPLCompiler ..> SLRParser
+    SPLCompiler ..> XmlTreeWriter
+    SPLCompiler ..> ErrorReporter
