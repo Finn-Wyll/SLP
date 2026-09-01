@@ -25,6 +25,12 @@ javac -d target/classes $(find src/main/java -name "*.java")
 java -cp target/classes spl.SPLCompiler path/to/SPL.txt tree.xml
 ```
 
+An example program is provided at [`examples/SPL.txt`](examples/SPL.txt):
+
+```bash
+java -cp target/classes spl.SPLCompiler examples/SPL.txt tree.xml
+```
+
 - If the input is syntactically valid SPL, a structured `tree.xml` syntax
   tree is written (root/inner/leaf nodes with unique IDs, contents,
   children, and parent links).
